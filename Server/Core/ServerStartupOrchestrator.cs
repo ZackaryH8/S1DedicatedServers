@@ -23,6 +23,7 @@ using MelonLoader;
 using Il2CppScheduleOne.DevUtilities;
 using Il2CppScheduleOne.Persistence;
 using Il2CppScheduleOne.PlayerScripts;
+using Il2CppScheduleOne.Persistence.Datas;
 using Il2CppScheduleOne.Quests;
 #else
 using ScheduleOne.DevUtilities;
