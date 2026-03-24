@@ -249,12 +249,14 @@ namespace DedicatedServerMod.Client.Managers
         {
             if (newButton == null || continueButton == null)
             {
+                logger.Warning($"newButton and continueButton are null when positioning button");
                 return;
             }
 
             Transform parent = continueButton.parent;
             if (parent == null)
             {
+                logger.Warning("Continue button parent is null");
                 return;
             }
 
@@ -263,7 +265,15 @@ namespace DedicatedServerMod.Client.Managers
             LayoutGroup layoutGroup = parent.GetComponent<LayoutGroup>();
             if (layoutGroup != null)
             {
-                LayoutRebuilder.ForceRebuildLayoutImmediate(parent as RectTransform);
+                RectTransform parentRect = parent as RectTransform;
+                if (parentRect != null)
+                {
+                    LayoutRebuilder.ForceRebuildLayoutImmediate(parentRect);
+                }
+                else
+                {
+                    logger.Warning("Parent does not have RectTransform component, skipping layout rebuild");
+                }
                 return;
             }
 
@@ -271,6 +281,7 @@ namespace DedicatedServerMod.Client.Managers
             RectTransform newRect = newButton.GetComponent<RectTransform>();
             if (continueRect == null || newRect == null)
             {
+                logger.Warning("Could not get RectTransform components for positioning");
                 return;
             }
 
