@@ -48,68 +48,117 @@ namespace DedicatedServerMod.Shared.Patches
     [HarmonyPatch(typeof(WheelType), "Awake")]
     internal static class WheelAwakePatches
     {
-        private static void Postfix(ref VehicleSettingsType ____settings, WheelDataType ____defaultData)
+        private static void Postfix(WheelType __instance)
         {
-            if (____settings != null)
+            try
             {
-                return;
-            }
+                // Use reflection to access private fields since direct field access fails in IL2CPP
+                var settingsField = typeof(WheelType).GetField("_settings", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var defaultDataField = typeof(WheelType).GetField("_defaultData", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
-            ____settings = ____defaultData?.Settings?.Clone() ?? new VehicleSettingsType();
-            WeatherStabilityLog.WarningOnce(
-                "wheel-awake-default-settings",
-                "Recovered missing wheel settings during Wheel.Awake; vehicle weather friction will use a safe fallback.");
+                if (settingsField == null || defaultDataField == null)
+                {
+                    WeatherStabilityLog.WarningOnce(
+                        "wheel-awake-reflection-failed",
+                        "Could not access wheel private fields via reflection; wheel settings recovery disabled.");
+                    return;
+                }
+
+                var currentSettings = settingsField.GetValue(__instance) as VehicleSettingsType;
+                if (currentSettings != null)
+                {
+                    return;
+                }
+
+                var defaultData = defaultDataField.GetValue(__instance) as WheelDataType;
+                var newSettings = defaultData?.Settings?.Clone() ?? new VehicleSettingsType();
+
+                settingsField.SetValue(__instance, newSettings);
+                WeatherStabilityLog.WarningOnce(
+                    "wheel-awake-default-settings",
+                    "Recovered missing wheel settings during Wheel.Awake; vehicle weather friction will use a safe fallback.");
+            }
+            catch (Exception ex)
+            {
+                WeatherStabilityLog.WarningOnce(
+                    "wheel-awake-exception",
+                    $"Exception during wheel settings recovery: {ex.GetType().Name}: {ex.Message}");
+            }
         }
     }
 
     [HarmonyPatch(typeof(WheelType), nameof(WheelType.OnWeatherChange))]
     internal static class WheelOnWeatherChangePatches
     {
-        private static bool Prefix(
-            WeatherConditionsType newConditions,
-            WheelDataType ____defaultData,
-            WheelOverrideDataType ____rainOverrideData,
-            LandVehicleType ___vehicle,
-            ref VehicleSettingsType ____settings)
+        private static bool Prefix(WheelType __instance, WeatherConditionsType newConditions)
         {
-            VehicleSettingsType resolvedSettings = ____defaultData?.Settings?.Clone()
-                ?? ____settings?.Clone()
-                ?? new VehicleSettingsType();
-
-            if (newConditions == null)
+            try
             {
-                ____settings = resolvedSettings;
-                WeatherStabilityLog.WarningOnce(
-                    "wheel-null-weather-conditions",
-                    "Wheel.OnWeatherChange received null weather conditions; keeping default wheel settings.");
+                // Use reflection to access private fields since direct field access fails in IL2CPP
+                var settingsField = typeof(WheelType).GetField("_settings", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var defaultDataField = typeof(WheelType).GetField("_defaultData", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var rainOverrideDataField = typeof(WheelType).GetField("_rainOverrideData", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var vehicleField = typeof(WheelType).GetField("_vehicle", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+                if (settingsField == null || defaultDataField == null || rainOverrideDataField == null || vehicleField == null)
+                {
+                    WeatherStabilityLog.WarningOnce(
+                        "wheel-weather-reflection-failed",
+                        "Could not access wheel private fields via reflection; weather updates may be unstable.");
+                    return true; // Let original method run
+                }
+
+                var defaultData = defaultDataField.GetValue(__instance) as WheelDataType;
+                var rainOverrideData = rainOverrideDataField.GetValue(__instance) as WheelOverrideDataType;
+                var vehicle = vehicleField.GetValue(__instance) as LandVehicleType;
+                var currentSettings = settingsField.GetValue(__instance) as VehicleSettingsType;
+
+                VehicleSettingsType resolvedSettings = defaultData?.Settings?.Clone()
+                    ?? currentSettings?.Clone()
+                    ?? new VehicleSettingsType();
+
+                if (newConditions == null)
+                {
+                    settingsField.SetValue(__instance, resolvedSettings);
+                    WeatherStabilityLog.WarningOnce(
+                        "wheel-null-weather-conditions",
+                        "Wheel.OnWeatherChange received null weather conditions; keeping default wheel settings.");
+                    return false;
+                }
+
+                bool canApplyRainOverride = newConditions.Rainy > 0f
+                    && vehicle != null
+                    && !vehicle.IsUnderCover
+                    && rainOverrideData?.Settings != null;
+
+                if (canApplyRainOverride)
+                {
+                    resolvedSettings = resolvedSettings.Blend(rainOverrideData.Settings, newConditions.Rainy);
+                }
+                else if (newConditions.Rainy > 0f && rainOverrideData?.Settings == null)
+                {
+                    WeatherStabilityLog.WarningOnce(
+                        "wheel-missing-rain-override",
+                        "A wheel is missing rain override data after the weather update; using default friction settings.");
+                }
+
+                if (vehicle == null)
+                {
+                    WeatherStabilityLog.WarningOnce(
+                        "wheel-missing-vehicle",
+                        "A wheel could not resolve its parent vehicle during weather updates; using default friction settings.");
+                }
+
+                settingsField.SetValue(__instance, resolvedSettings);
                 return false;
             }
-
-            bool canApplyRainOverride = newConditions.Rainy > 0f
-                && ___vehicle != null
-                && !___vehicle.IsUnderCover
-                && ____rainOverrideData?.Settings != null;
-
-            if (canApplyRainOverride)
-            {
-                resolvedSettings = resolvedSettings.Blend(____rainOverrideData.Settings, newConditions.Rainy);
-            }
-            else if (newConditions.Rainy > 0f && ____rainOverrideData?.Settings == null)
+            catch (Exception ex)
             {
                 WeatherStabilityLog.WarningOnce(
-                    "wheel-missing-rain-override",
-                    "A wheel is missing rain override data after the weather update; using default friction settings.");
+                    "wheel-weather-exception",
+                    $"Exception during wheel weather update: {ex.GetType().Name}: {ex.Message}");
+                return true; // Let original method run on error
             }
-
-            if (___vehicle == null)
-            {
-                WeatherStabilityLog.WarningOnce(
-                    "wheel-missing-vehicle",
-                    "A wheel could not resolve its parent vehicle during weather updates; using default friction settings.");
-            }
-
-            ____settings = resolvedSettings;
-            return false;
         }
     }
 
@@ -152,78 +201,109 @@ namespace DedicatedServerMod.Shared.Patches
     {
         private static readonly AnimationCurve FallbackBlendCurve = AnimationCurve.Linear(0f, 0f, 1f, 1f);
 
-        private static bool Prefix(
-            SyncList<WeatherVolumeType> ____activeWeatherVolumes,
-            int ____targetWeatherVolumeIndex,
-            int ____neighbourWeatherVolumeIndex,
-            bool ____hasWeatherVolumeNeighbour,
-            float ____targetWeatherBlendValue,
-            float ____neighbourWeatherBlendValue,
-            AnimationCurve ____blendCurve)
+        private static bool Prefix(EnvironmentManagerType __instance)
         {
-            if (____activeWeatherVolumes == null || ____activeWeatherVolumes.Count == 0)
+            try
             {
-                return false;
-            }
+                // Use reflection to access private fields since direct field access fails in IL2CPP
+                var activeWeatherVolumesField = typeof(EnvironmentManagerType).GetField("_activeWeatherVolumes", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var targetWeatherVolumeIndexField = typeof(EnvironmentManagerType).GetField("_targetWeatherVolumeIndex", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var neighbourWeatherVolumeIndexField = typeof(EnvironmentManagerType).GetField("_neighbourWeatherVolumeIndex", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var hasWeatherVolumeNeighbourField = typeof(EnvironmentManagerType).GetField("_hasWeatherVolumeNeighbour", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var targetWeatherBlendValueField = typeof(EnvironmentManagerType).GetField("_targetWeatherBlendValue", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var neighbourWeatherBlendValueField = typeof(EnvironmentManagerType).GetField("_neighbourWeatherBlendValue", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var blendCurveField = typeof(EnvironmentManagerType).GetField("_blendCurve", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
-            if (____targetWeatherVolumeIndex < 0 || ____targetWeatherVolumeIndex >= ____activeWeatherVolumes.Count)
-            {
-                for (int i = 0; i < ____activeWeatherVolumes.Count; i++)
+                if (activeWeatherVolumesField == null || targetWeatherVolumeIndexField == null ||
+                    neighbourWeatherVolumeIndexField == null || hasWeatherVolumeNeighbourField == null ||
+                    targetWeatherBlendValueField == null || neighbourWeatherBlendValueField == null ||
+                    blendCurveField == null)
                 {
-                    WeatherVolumeType volume = ____activeWeatherVolumes[i];
+                    WeatherStabilityLog.WarningOnce(
+                        "environment-blend-reflection-failed",
+                        "Could not access EnvironmentManager private fields via reflection; weather blending disabled.");
+                    return false;
+                }
+
+                var activeWeatherVolumes = activeWeatherVolumesField.GetValue(__instance) as SyncList<WeatherVolumeType>;
+                var targetWeatherVolumeIndex = (int)targetWeatherVolumeIndexField.GetValue(__instance);
+                var neighbourWeatherVolumeIndex = (int)neighbourWeatherVolumeIndexField.GetValue(__instance);
+                var hasWeatherVolumeNeighbour = (bool)hasWeatherVolumeNeighbourField.GetValue(__instance);
+                var targetWeatherBlendValue = (float)targetWeatherBlendValueField.GetValue(__instance);
+                var neighbourWeatherBlendValue = (float)neighbourWeatherBlendValueField.GetValue(__instance);
+                var blendCurve = blendCurveField.GetValue(__instance) as AnimationCurve;
+
+                if (activeWeatherVolumes == null || activeWeatherVolumes.Count == 0)
+                {
+                    return false;
+                }
+
+                if (targetWeatherVolumeIndex < 0 || targetWeatherVolumeIndex >= activeWeatherVolumes.Count)
+                {
+                    for (int i = 0; i < activeWeatherVolumes.Count; i++)
+                    {
+                        WeatherVolumeType volume = activeWeatherVolumes[i];
+                        if (volume == null)
+                        {
+                            continue;
+                        }
+
+                        volume.SetNeighbourVolume(null);
+                        volume.BlendEffects(0f, blendCurve ?? FallbackBlendCurve);
+                    }
+
+                    return false;
+                }
+
+                WeatherVolumeType targetVolume = activeWeatherVolumes[targetWeatherVolumeIndex];
+                WeatherVolumeType neighbourVolume = null;
+                bool hasValidNeighbour = hasWeatherVolumeNeighbour
+                    && neighbourWeatherVolumeIndex >= 0
+                    && neighbourWeatherVolumeIndex < activeWeatherVolumes.Count;
+
+                if (hasValidNeighbour)
+                {
+                    neighbourVolume = activeWeatherVolumes[neighbourWeatherVolumeIndex];
+                    hasValidNeighbour = neighbourVolume != null;
+                }
+
+                AnimationCurve finalBlendCurve = blendCurve ?? FallbackBlendCurve;
+
+                for (int i = 0; i < activeWeatherVolumes.Count; i++)
+                {
+                    WeatherVolumeType volume = activeWeatherVolumes[i];
                     if (volume == null)
                     {
                         continue;
                     }
 
+                    if (i == targetWeatherVolumeIndex)
+                    {
+                        volume.SetNeighbourVolume(hasValidNeighbour ? neighbourVolume : null);
+                        volume.BlendEffects(hasValidNeighbour ? Mathf.Clamp01(targetWeatherBlendValue) : 1f, finalBlendCurve);
+                        continue;
+                    }
+
+                    if (hasValidNeighbour && i == neighbourWeatherVolumeIndex)
+                    {
+                        volume.SetNeighbourVolume(targetVolume);
+                        volume.BlendEffects(Mathf.Clamp01(neighbourWeatherBlendValue), finalBlendCurve);
+                        continue;
+                    }
+
                     volume.SetNeighbourVolume(null);
-                    volume.BlendEffects(0f, ____blendCurve ?? FallbackBlendCurve);
+                    volume.BlendEffects(0f, finalBlendCurve);
                 }
 
                 return false;
             }
-
-            WeatherVolumeType targetVolume = ____activeWeatherVolumes[____targetWeatherVolumeIndex];
-            WeatherVolumeType neighbourVolume = null;
-            bool hasValidNeighbour = ____hasWeatherVolumeNeighbour
-                && ____neighbourWeatherVolumeIndex >= 0
-                && ____neighbourWeatherVolumeIndex < ____activeWeatherVolumes.Count;
-
-            if (hasValidNeighbour)
+            catch (Exception ex)
             {
-                neighbourVolume = ____activeWeatherVolumes[____neighbourWeatherVolumeIndex];
-                hasValidNeighbour = neighbourVolume != null;
+                WeatherStabilityLog.WarningOnce(
+                    "environment-blend-exception",
+                    $"Exception during weather blending: {ex.GetType().Name}: {ex.Message}");
+                return false;
             }
-
-            AnimationCurve blendCurve = ____blendCurve ?? FallbackBlendCurve;
-
-            for (int i = 0; i < ____activeWeatherVolumes.Count; i++)
-            {
-                WeatherVolumeType volume = ____activeWeatherVolumes[i];
-                if (volume == null)
-                {
-                    continue;
-                }
-
-                if (i == ____targetWeatherVolumeIndex)
-                {
-                    volume.SetNeighbourVolume(hasValidNeighbour ? neighbourVolume : null);
-                    volume.BlendEffects(hasValidNeighbour ? Mathf.Clamp01(____targetWeatherBlendValue) : 1f, blendCurve);
-                    continue;
-                }
-
-                if (hasValidNeighbour && i == ____neighbourWeatherVolumeIndex)
-                {
-                    volume.SetNeighbourVolume(targetVolume);
-                    volume.BlendEffects(Mathf.Clamp01(____neighbourWeatherBlendValue), blendCurve);
-                    continue;
-                }
-
-                volume.SetNeighbourVolume(null);
-                volume.BlendEffects(0f, blendCurve);
-            }
-
-            return false;
         }
     }
 }
