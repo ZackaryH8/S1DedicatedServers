@@ -261,7 +261,7 @@ namespace DedicatedServerMod.Client.Managers
             loadManager.LoadStatus = LoadManager.ELoadStatus.LoadingData;
             timeline.Mark("WaitForPlayerData");
             float dataWaitStart = Time.realtimeSinceStartup;
-            yield return new WaitUntil(() => Player.Local == null || Player.Local.playerDataRetrieveReturned);
+            yield return new WaitUntil((Func<bool>)(() => Player.Local == null || Player.Local.playerDataRetrieveReturned));
             if (Player.Local == null)
             {
                 timeline.MarkError("PlayerDataReceive", "Player.Local was lost before data retrieval completed");
@@ -276,10 +276,10 @@ namespace DedicatedServerMod.Client.Managers
             loadManager.LoadStatus = LoadManager.ELoadStatus.Initializing;
             timeline.Mark("WaitForReplication");
             float replicationWaitStart = Time.realtimeSinceStartup;
-            yield return new WaitUntil(() =>
+            yield return new WaitUntil((Func<bool>)(() =>
                 NetworkSingleton<ReplicationQueue>.InstanceExists &&
                 (NetworkSingleton<ReplicationQueue>.Instance.ReplicationDoneForLocalPlayer ||
-                 NetworkSingleton<ReplicationQueue>.Instance.LocalPlayerReplicationTimedOut));
+                 NetworkSingleton<ReplicationQueue>.Instance.LocalPlayerReplicationTimedOut)));
 
             var replicationQueue = NetworkSingleton<ReplicationQueue>.Instance;
             if (replicationQueue.LocalPlayerReplicationTimedOut)
@@ -516,7 +516,7 @@ namespace DedicatedServerMod.Client.Managers
 
                 if (waitForSave)
                 {
-                    yield return new WaitUntil(() => Player.Local == null || Player.Local.playerSaveRequestReturned || Time.realtimeSinceStartup - saveWaitStart > 2f);
+                    yield return new WaitUntil((Func<bool>)(() => Player.Local == null || Player.Local.playerSaveRequestReturned || Time.realtimeSinceStartup - saveWaitStart > 2f));
                 }
             }
 
